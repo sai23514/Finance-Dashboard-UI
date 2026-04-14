@@ -1,6 +1,11 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { Transaction, UserRole, FilterState, AppState } from '../types';
-import { mockTransactions } from '../data/mockData';
+import { db } from '../firebase';
+import { useAuth } from './AuthContext';
+import {
+  collection, addDoc, updateDoc, deleteDoc,
+  doc, onSnapshot, query, orderBy
+} from 'firebase/firestore';
 
 interface AppContextType extends AppState {
   addTransaction: (transaction: Omit<Transaction, 'id'>) => void;
@@ -24,24 +29,11 @@ const defaultFilters: FilterState = {
 export const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  // Initialize state from localStorage or defaults
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    const saved = localStorage.getItem('transactions');
-    if (saved) {
-      const parsedTransactions = JSON.parse(saved);
-      // Check if we have any April 2026 transactions
-      const hasAprilData = parsedTransactions.some((t: Transaction) =>
-        t.date.startsWith('2026-04')
-      );
-      // If no April data, use fresh mock data
-      if (!hasAprilData) {
-        console.log('🔄 Updating to fresh data with April transactions');
-        return mockTransactions;
-      }
-      return parsedTransactions;
-    }
-    return mockTransactions;
-  });
+
+  const { user } = useAuth();
+
+  // ✅ Firestore-based transactions
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
 
   const [userRole, setUserRole] = useState<UserRole>(() => {
     const saved = localStorage.getItem('userRole');
@@ -55,11 +47,28 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     return saved ? JSON.parse(saved) : false;
   });
 
-  // Persist to localStorage
+  // 🔥 Load transactions from Firestore (real-time)
   useEffect(() => {
-    localStorage.setItem('transactions', JSON.stringify(transactions));
-  }, [transactions]);
+    if (!user) return;
 
+    const q = query(
+      collection(db, 'users', user.uid, 'transactions'),
+      orderBy('date', 'desc')
+    );
+
+    const unsub = onSnapshot(q, (snap) => {
+      const data = snap.docs.map(d => ({
+        id: d.id,
+        ...d.data()
+      })) as Transaction[];
+
+      setTransactions(data);
+    });
+
+    return unsub;
+  }, [user]);
+
+  // Persist other settings (still localStorage)
   useEffect(() => {
     localStorage.setItem('userRole', userRole);
   }, [userRole]);
@@ -73,22 +82,33 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     }
   }, [darkMode]);
 
-  const addTransaction = (transaction: Omit<Transaction, 'id'>) => {
-    const newTransaction: Transaction = {
-      ...transaction,
-      id: Date.now().toString(),
-    };
-    setTransactions((prev) => [newTransaction, ...prev]);
-  };
+  // ➕ Add transaction
+  const addTransaction = async (transaction: Omit<Transaction, 'id'>) => {
+    if (!user) return;
 
-  const updateTransaction = (id: string, updates: Partial<Transaction>) => {
-    setTransactions((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, ...updates } : t))
+    await addDoc(
+      collection(db, 'users', user.uid, 'transactions'),
+      transaction
     );
   };
 
-  const deleteTransaction = (id: string) => {
-    setTransactions((prev) => prev.filter((t) => t.id !== id));
+  // ✏️ Update transaction
+  const updateTransaction = async (id: string, updates: Partial<Transaction>) => {
+    if (!user) return;
+
+    await updateDoc(
+      doc(db, 'users', user.uid, 'transactions', id),
+      updates
+    );
+  };
+
+  // ❌ Delete transaction
+  const deleteTransaction = async (id: string) => {
+    if (!user) return;
+
+    await deleteDoc(
+      doc(db, 'users', user.uid, 'transactions', id)
+    );
   };
 
   const updateFilters = (newFilters: Partial<FilterState>) => {

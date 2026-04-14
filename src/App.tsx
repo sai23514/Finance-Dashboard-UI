@@ -1,14 +1,34 @@
 import React, { useState } from 'react';
 import { AppProvider } from './context/AppContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+
 import { Header } from './components/layout/Header';
 import { Navigation } from './components/layout/Navigation';
 import { Dashboard } from './components/dashboard/Dashboard';
 import { Transactions } from './components/transactions/Transactions';
 import { Insights } from './components/insights/Insights';
+import { LoginPage } from './components/auth/LoginPage';
 
-function App() {
+// 🔐 Protected App Content
+function AppContent() {
+  const { user, loading } = useAuth();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'insights'>('dashboard');
 
+  // ⏳ Show loading while checking auth
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        Loading...
+      </div>
+    );
+  }
+
+  // 🔒 If not logged in → show login page
+  if (!user) {
+    return <LoginPage />;
+  }
+
+  // ✅ If logged in → show app
   return (
     <AppProvider>
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
@@ -30,6 +50,15 @@ function App() {
         </footer>
       </div>
     </AppProvider>
+  );
+}
+
+// 🌍 Root App
+function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   );
 }
 
